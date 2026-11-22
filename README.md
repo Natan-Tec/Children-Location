@@ -15,7 +15,8 @@ Um único app: ao criar a conta a pessoa escolhe **responsável** ou **filho(a)*
 1. Crie um projeto no [Firebase Console](https://console.firebase.google.com), adicione um app Android com o pacote `com.natantec.childrenlocation` e baixe o `google-services.json` para `app/`.
 2. Ative **Authentication → E-mail/senha** e crie o banco **Firestore**.
 3. Cole o conteúdo de `firestore.rules` em Firestore → Regras → Publicar.
-4. Abra a pasta no Android Studio, deixe sincronizar o Gradle e rode em dois celulares (um como filho, outro como responsável).
+4. **Compilar pelo GitHub Actions (sem Android Studio):** converta o `google-services.json` para base64 (`base64 -w0 google-services.json`) e salve em Settings → Secrets and variables → Actions com o nome `GOOGLE_SERVICES_JSON`. A cada push na `main` (ou em Actions → Build APK → Run workflow) o APK debug aparece em Artifacts.
+5. Instale o APK em dois celulares (um como filho, outro como responsável).
 
 ## Segurança — o que já existe e o que falta
 
