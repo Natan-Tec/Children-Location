@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function roleOf(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.role;
+    }
+    function isChild()  { return signedIn() && roleOf(request.auth.uid) == 'child'; }
+    function isParent() { return signedIn() && roleOf(request.auth.uid) == 'parent'; }
+
+    // Perfil: o papel é definido UMA vez e nunca mais pode ser alterado.
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.role in ['parent', 'child'];
+      allow update, delete: if false;
+    }
+
+    // Códigos de pareamento: criados pelo celular da CRIANÇA, válidos por 10 min.
+    // Só dá para buscar um código específico (get), nunca listar.
+    match /pairingCodes/{code} {
+      allow get: if isParent();
+      allow list: if false;
+      allow create: if isChild()
+                    && request.resource.data.childUid == request.auth.uid
+                    && request.resource.data.expiresAt > request.time
+                    && request.resource.data.expiresAt < request.time + duration.value(15, 'm');
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.childUid == request.auth.uid;
+    }
+
+    // Vínculo pai/mãe -> filho. Só nasce com um código válido gerado pela criança.
+    match /links/{linkId} {
+      allow read: if signedIn()
+                  && (resource.data.parentUid == request.auth.uid
+                      || resource.data.childUid == request.auth.uid);
+      allow create: if isParent()
+                    && request.resource.data.parentUid == request.auth.uid
+                    && linkId == request.auth.uid + '_' + request.resource.data.childUid
+                    && get(/databases/$(database)/documents/pairingCodes/$(request.resource.data.code)).data.childUid
+                       == request.resource.data.childUid
+                    && get(/databases/$(database)/documents/pairingCodes/$(request.resource.data.code)).data.expiresAt
+                       > request.time;
+      allow update: if false;
+      // A criança (ou o próprio responsável) pode desfazer o vínculo a qualquer momento.
+      allow delete: if signedIn()
+                    && (resource.data.parentUid == request.auth.uid
+                        || resource.data.childUid == request.auth.uid);
+    }
+
+    // Localização: só a criança escreve; só ela e responsáveis vinculados leem.
+    match /locations/{childUid} {
+      allow write: if isChild() && request.auth.uid == childUid;
+      allow read: if signedIn()
+                  && (request.auth.uid == childUid
+                      || exists(/databases/$(database)/documents/links/$(request.auth.uid + '_' + childUid)));
+    }
+  }
+}
