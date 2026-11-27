@@ -13,8 +13,20 @@ android {
         applicationId = "com.natantec.childrenlocation"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.2"
+    }
+
+    // Chave de debug FIXA (versionada de propósito): todo build sai com a mesma assinatura,
+    // então o APK atualiza por cima do anterior e o login com Google tem um SHA-1 estável.
+    // Não é um segredo. Para a versão pública, trocar por uma chave de release privada.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -47,6 +59,15 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    // Login com Google (Credential Manager)
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+
+    // Leitor de QR da Google (não precisa de permissão de câmera) e gerador de QR
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("com.google.zxing:core:3.5.3")
 
     // Mapa OpenStreetMap, sem chave de API
     implementation("org.osmdroid:osmdroid-android:6.1.20")

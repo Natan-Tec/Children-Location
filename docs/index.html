@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel Children Location</title>
+<meta name="theme-color" content="#1565c0">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #ffffff; --text: #17202a; --muted: #5d6b79;
+    --line: #dde3ea; --brand: #1565c0; --brand-text: #ffffff;
+    --ok: #1b7f3b; --warn: #b26a00; --bad: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101418; --card: #1a2027; --text: #e8edf2; --muted: #9aa7b4;
+      --line: #2b343d; --brand: #5aa2f0; --brand-text: #0b1a2b;
+      --ok: #6fd08c; --warn: #f0b95a; --bad: #f2877f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--card);
+    position: sticky; top: 0; z-index: 2;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header small { color: var(--muted); display: block; font-size: 12px; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  button {
+    font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
+    padding: 10px 14px; border-radius: 10px; cursor: pointer; min-height: 44px;
+  }
+  button.primary { background: var(--brand); color: var(--brand-text); border-color: var(--brand); }
+  button.danger { color: var(--bad); }
+  button.tab[aria-selected="true"] { background: var(--brand); color: var(--brand-text); border-color: var(--brand); }
+  .badge {
+    display: inline-block; min-width: 22px; padding: 0 7px; margin-left: 6px; border-radius: 11px;
+    background: var(--bad); color: #fff; font-size: 13px; text-align: center;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .card h3 { margin: 0 0 2px; font-size: 16px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .center { text-align: center; padding: 48px 16px; }
+  .banner { background: var(--card); border: 1px solid var(--bad); color: var(--bad); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+  ul { margin: 6px 0 0; padding-left: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Painel Children Location</h1>
+    <small id="who"></small>
+  </div>
+  <button id="logout" hidden>Sair</button>
+</header>
+<main id="main"><p class="center muted">Carregando…</p></main>
+
+<script type="module">
+import cfg from "./config.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getFirestore, collection, collectionGroup, onSnapshot, doc, updateDoc }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+const ADMIN_EMAIL = "tecnologiconatan@gmail.com"; // só para a interface; quem protege são as regras do Firestore
+const main = document.getElementById("main");
+const who = document.getElementById("who");
+const logoutBtn = document.getElementById("logout");
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, "");
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+function ago(ms) {
+  if (!ms) return "nunca";
+  const s = Math.round((Date.now() - ms) / 1000);
+  const rtf = new Intl.RelativeTimeFormat("pt-BR", { numeric: "auto" });
+  if (s < 60) return "agora há pouco";
+  if (s < 3600) return rtf.format(-Math.round(s / 60), "minute");
+  if (s < 86400) return rtf.format(-Math.round(s / 3600), "hour");
+  return rtf.format(-Math.round(s / 86400), "day");
+}
+const ts = (v) => (v && v.toMillis ? v.toMillis() : 0);
+
+// ---------- estado ----------
+let db = null, auth = null;
+let users = [], families = [], children = [], live = [];
+let tab = "pending";
+let errorMsg = "";
+let unsubs = [];
+
+if (!cfg.apiKey) {
+  main.replaceChildren(h("div", { class: "banner" },
+    "Configuração do Firebase ausente. Rode o workflow \"Painel (GitHub Pages)\" no GitHub Actions."));
+} else {
+  const app = initializeApp(cfg);
+  auth = getAuth(app);
+  db = getFirestore(app);
+  onAuthStateChanged(auth, onAuth);
+}
+
+logoutBtn.addEventListener("click", () => signOut(auth));
+
+function stop() { unsubs.forEach((u) => u()); unsubs = []; }
+
+function onAuth(user) {
+  stop();
+  users = []; families = []; children = []; live = [];
+  if (!user) {
+    who.textContent = "";
+    logoutBtn.hidden = true;
+    renderLogin();
+    return;
+  }
+  who.textContent = user.email;
+  logoutBtn.hidden = false;
+  if ((user.email || "").toLowerCase() !== ADMIN_EMAIL) {
+    main.replaceChildren(h("div", { class: "center" },
+      h("h2", {}, "Acesso negado"),
+      h("p", { class: "muted" }, "Esta conta não é a do administrador.")));
+    return;
+  }
+  const fail = (e) => { errorMsg = "Erro ao ler os dados: " + (e.code || e.message); render(); };
+  unsubs.push(onSnapshot(collection(db, "users"), (s) => { users = s.docs.map((d) => ({ id: d.id, ...d.data() })); errorMsg = ""; render(); }, fail));
+  unsubs.push(onSnapshot(collection(db, "families"), (s) => { families = s.docs.map((d) => ({ id: d.id, ...d.data() })); render(); }, fail));
+  unsubs.push(onSnapshot(collectionGroup(db, "children"), (s) => {
+    children = s.docs.map((d) => ({ id: d.id, familyId: d.ref.parent.parent.id, ...d.data() })); render();
+  }, fail));
+  unsubs.push(onSnapshot(collectionGroup(db, "live"), (s) => {
+    live = s.docs.map((d) => ({ childId: d.ref.parent.parent.id, ...d.data() })); render();
+  }, fail));
+  render();
+}
+
+function renderLogin() {
+  main.replaceChildren(h("div", { class: "center" },
+    h("h2", {}, "Entrar"),
+    h("p", { class: "muted" }, "Só o administrador consegue entrar."),
+    h("button", { class: "primary", onclick: async () => {
+      try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+      catch (e) {
+        const msg = e.code === "auth/unauthorized-domain"
+          ? "Este endereço ainda não está autorizado no Firebase (Authentication > Configurações > Domínios autorizados)."
+          : "Não foi possível entrar: " + (e.code || e.message);
+        main.prepend(h("div", { class: "banner" }, msg));
+      }
+    } }, "Entrar com Google")));
+}
+
+async function setUser(id, patch) {
+  try { await updateDoc(doc(db, "users", id), patch); }
+  catch (e) { errorMsg = "Não foi possível salvar: " + (e.code || e.message); render(); }
+}
+
+function userCard(u, actions) {
+  const state = u.bloqueado ? h("span", { class: "pill bad" }, "bloqueado")
+    : u.aprovado ? h("span", { class: "pill ok" }, "aprovado")
+    : h("span", { class: "pill warn" }, "pendente");
+  const when = ts(u.createdAt) ? "criou a conta " + ago(ts(u.createdAt)) : "";
+  return h("div", { class: "card" },
+    h("h3", {}, u.name || "(sem nome)", " ", state),
+    h("div", { class: "muted" }, u.email),
+    when && h("div", { class: "muted" }, when),
+    h("div", { class: "row" }, actions));
+}
+
+function render() {
+  if (!auth || !auth.currentUser || (auth.currentUser.email || "").toLowerCase() !== ADMIN_EMAIL) return;
+
+  const pending = users.filter((u) => !u.aprovado && !u.bloqueado).sort((a, b) => ts(b.createdAt) - ts(a.createdAt));
+  const approved = users.filter((u) => u.aprovado && !u.bloqueado);
+  const blocked = users.filter((u) => u.bloqueado);
+  document.title = (pending.length ? `(${pending.length}) ` : "") + "Painel Children Location";
+
+  const tabBtn = (id, label, n) => h("button", { class: "tab", role: "tab", "aria-selected": String(tab === id),
+    onclick: () => { tab = id; render(); } }, label, n ? h("span", { class: "badge" }, n) : null);
+
+  const content = [];
+  if (errorMsg) content.push(h("div", { class: "banner" }, errorMsg));
+
+  if (tab === "pending") {
+    if (!pending.length) content.push(h("p", { class: "center muted" }, "Nenhum pedido pendente. Tudo em dia ✅"));
+    pending.forEach((u) => content.push(userCard(u, [
+      h("button", { class: "primary", onclick: () => setUser(u.id, { aprovado: true, bloqueado: false }) }, "Aprovar"),
+      h("button", { class: "danger", onclick: () => confirm(`Bloquear ${u.email}?`) && setUser(u.id, { aprovado: false, bloqueado: true }) }, "Bloquear"),
+    ])));
+  } else if (tab === "approved") {
+    if (!approved.length) content.push(h("p", { class: "center muted" }, "Ninguém aprovado ainda."));
+    approved.forEach((u) => content.push(userCard(u, [
+      h("button", { onclick: () => setUser(u.id, { aprovado: false }) }, "Revogar aprovação"),
+      h("button", { class: "danger", onclick: () => confirm(`Bloquear ${u.email}?`) && setUser(u.id, { aprovado: false, bloqueado: true }) }, "Bloquear"),
+    ])));
+  } else if (tab === "blocked") {
+    if (!blocked.length) content.push(h("p", { class: "center muted" }, "Nenhuma conta bloqueada."));
+    blocked.forEach((u) => content.push(userCard(u, [
+      h("button", { onclick: () => setUser(u.id, { bloqueado: false }) }, "Desbloquear"),
+    ])));
+  } else {
+    if (!families.length) content.push(h("p", { class: "center muted" }, "Nenhuma família criada ainda."));
+    families.forEach((f) => {
+      const kids = children.filter((c) => c.familyId === f.id);
+      const names = Object.values(f.memberNames || {});
+      content.push(h("div", { class: "card" },
+        h("h3", {}, "Família ", f.name),
+        h("div", { class: "muted" }, "Responsáveis:"),
+        h("ul", {}, names.map((n) => h("li", {}, n))),
+        h("div", { class: "muted", style: "margin-top:8px" }, "Crianças:"),
+        kids.length ? h("ul", {}, kids.map((c) => {
+          const l = live.find((x) => x.childId === c.id);
+          const last = l ? ts(l.updatedAt) : 0;
+          const stale = last && Date.now() - last > 10 * 60 * 1000;
+          return h("li", {}, `${c.emoji || ""} ${c.name} — `,
+            !c.deviceUid ? h("span", { class: "warn" }, "aguardando pareamento")
+              : h("span", { class: stale ? "bad" : "ok" },
+                  last ? `última localização ${ago(last)}${l.battery >= 0 ? ` · bateria ${l.battery}%` : ""}` : "pareado, sem localização ainda"));
+        })) : h("p", { class: "muted" }, "nenhuma ainda")));
+    });
+  }
+
+  main.replaceChildren(
+    h("div", { class: "tabs", role: "tablist" },
+      tabBtn("pending", "Pendentes", pending.length),
+      tabBtn("approved", "Aprovados", 0),
+      tabBtn("families", "Famílias", 0),
+      tabBtn("blocked", "Bloqueados", 0)),
+    ...content);
+}
+
+// "há X minutos" se atualiza sozinho
+setInterval(() => { if (auth && auth.currentUser) render(); }, 60000);
+</script>
+</body>
+</html>

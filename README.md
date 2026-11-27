@@ -1,38 +1,50 @@
 # Children Location
 
-App Android (Kotlin + Jetpack Compose) para responsáveis saberem a localização do filho em tempo real.
-Um único app: ao criar a conta a pessoa escolhe **responsável** ou **filho(a)**.
+App Android (Kotlin + Jetpack Compose) para responsáveis acompanharem a localização dos filhos em tempo real.
 
-## Como funciona
+## Como funciona (beta 0.2)
 
-- **Filho(a):** serviço em primeiro plano com notificação permanente (sempre transparente). O Fused Location Provider combina GPS, Wi-Fi e rede celular. A localização vai para o Firestore a cada ~15 s.
-- **Responsável:** vê o filho num mapa OpenStreetMap (sem chave de API), com bateria, precisão e hora da última atualização.
-- **Pareamento:** iniciado pelo celular **do filho**. Ele gera um código de 8 dígitos (10 min, uso único) e o responsável digita. Sem acesso ao aparelho do filho, ninguém consegue vincular.
-- O filho vê quem acompanha e pode **remover** qualquer vínculo a qualquer momento.
+- **Só adultos têm conta** (e-mail e senha, ou Google). A **criança não cria conta**: instala o app, toca em "Sou criança: escanear QR code" e lê o QR gerado no celular dos pais.
+- **Família:** o primeiro responsável cria a família, cadastra as crianças (nome e figura) e convida outros adultos (mãe, avó...) pelo WhatsApp ou e-mail do próprio celular. O convidado cria conta com aquele e-mail e toca em "Aceitar".
+- **Aprovação de adultos (só na beta):** a conta de adulto nasce "pendente" e só cria família depois de aprovada no **painel de administração**. Adultos convidados por um responsável já aprovado entram sem aprovação.
+- **Criança:** vê o mapa com a própria posição. Não tem configurações, nem botão de sair ou parar. Só os pais desvinculam o aparelho.
+- **Localização:** serviço em primeiro plano com notificação permanente. O Fused Location Provider combina GPS, Wi-Fi e rede celular. Intervalo adaptativo (mais espaçado quando parada) para poupar bateria e a cota gratuita do Firebase. Volta sozinho após reiniciar o celular.
+- **Pareamento:** QR com token aleatório de 24 caracteres, uso único, válido por 15 minutos. Se o aparelho for desvinculado, ele percebe e volta para a tela inicial.
 
-## Configurar
+## Painel de administração
 
-1. Crie um projeto no [Firebase Console](https://console.firebase.google.com), adicione um app Android com o pacote `com.natantec.childrenlocation` e baixe o `google-services.json` para `app/`.
-2. Ative **Authentication → E-mail/senha** e crie o banco **Firestore**.
-3. Cole o conteúdo de `firestore.rules` em Firestore → Regras → Publicar.
-4. **Compilar pelo GitHub Actions (sem Android Studio):** converta o `google-services.json` para base64 (`base64 -w0 google-services.json`) e salve em Settings → Secrets and variables → Actions com o nome `GOOGLE_SERVICES_JSON`. A cada push na `main` (ou em Actions → Build APK → Run workflow) o APK debug aparece em Artifacts.
-5. Instale o APK em dois celulares (um como filho, outro como responsável).
+Página web (GitHub Pages) em `https://natan-tec.github.io/Children-Location/`. Entra-se com o Google do administrador (`tecnologiconatan@gmail.com`), vê os pedidos pendentes e aprova ou bloqueia. Também lista famílias, crianças e a última localização. Funciona no celular e pode ser adicionada à tela inicial.
 
-## Segurança — o que já existe e o que falta
+A configuração do Firebase da página é gerada pelo workflow **Painel (GitHub Pages)** a partir do mesmo secret do APK. Não é segredo (qualquer app carrega essa chave); quem protege os dados são as regras do Firestore.
 
-Já existe (nas regras do Firestore):
-- O papel é definido uma única vez e não pode ser alterado depois.
-- Só a criança escreve a própria localização; só responsáveis vinculados leem.
-- O vínculo só é criado com um código válido gerado pelo celular da criança.
+## Configurar o Firebase
 
-Falta fazer (por ordem de importância):
-1. **Impedir que uma criança se cadastre como responsável** (hoje o papel é autodeclarado): verificação de maioridade/identidade do responsável, por exemplo CPF + validação, ou convite via conta já verificada.
-2. **Limitar tentativas de código** (força bruta) com Cloud Functions + App Check.
-3. Firebase **App Check** (Play Integrity) para aceitar só o app original.
-4. Verificação de e-mail obrigatória antes de escolher o papel.
-5. Aviso periódico ao filho de quem está vendo a localização, e histórico de acessos.
-6. Política de privacidade e adequação à **LGPD** (dados de menores) antes de publicar na Play Store.
+1. Projeto no [Firebase Console](https://console.firebase.google.com) com um app Android de pacote `com.natantec.childrenlocation`.
+2. **Authentication:** ativar **E-mail/senha**, **Google** e **Anônimo** (usado pelo aparelho da criança). Em *Configurações > Domínios autorizados*, adicionar `natan-tec.github.io`.
+3. **Google:** em *Configurações do projeto > Seus apps*, adicionar o SHA-1 da chave fixa do app (abaixo) e **baixar de novo o `google-services.json`**.
+4. **Firestore:** criar o banco e colar o `firestore.rules` na aba Regras > Publicar.
+5. **GitHub:** salvar o `google-services.json` em base64 no secret `GOOGLE_SERVICES_JSON` (Settings > Secrets and variables > Actions). Em Settings > Pages, escolher **GitHub Actions** como origem.
 
-## Próximas funcionalidades
+SHA-1 da chave fixa: `1E:45:28:CC:23:39:38:57:83:A7:DC:75:B2:92:C0:C0:D6:54:C1:C7`
 
-Cercas virtuais (chegou/saiu da escola), histórico de trajeto, botão SOS, bateria baixa.
+## Compilar
+
+Pelo GitHub Actions: **Build APK** gera o APK a cada push; rodando manualmente (Actions > Build APK > Run workflow) ele também publica um pré-lançamento em Releases. A chave de assinatura é fixa (`app/debug.keystore`, versionada de propósito e sem segredo), então cada APK atualiza o anterior sem desinstalar. Para a versão pública, trocar por uma chave de release privada.
+
+## Segurança
+
+Já existe (regras do Firestore):
+- Só adulto aprovado cria família; o aprovado não pode ser alterado por ninguém além do administrador.
+- A criança (login anônimo) só consegue assumir um perfil com um QR válido de uso único e só escreve a localização do próprio perfil.
+- Só membros da família leem a localização. O convite só vale para o e-mail verificado do convidado.
+
+Limites conhecidos:
+- Nenhum sistema impede 100% que uma criança crie conta de adulto sem verificar identidade. Na beta isso é contido pela aprovação manual. Para a versão pública: sinais de idade da Google (Play Age Signals, a confirmar fora da Play Store) ou verificação de documento.
+- O APK da beta é baixável por qualquer pessoa. Contas novas ficam pendentes até a aprovação.
+- Sem o plano pago do Firebase não há servidor: o SOS (beta 0.3) usará escuta no app dos pais e SMS de reserva.
+- LGPD, política de privacidade e Play Store ficam fora da beta fechada e voltam antes de abrir para outras famílias.
+
+## Próximas betas
+
+- **0.3:** SOS tocando como chamada nos pais, ligar 190/192/193 pelo app, contatos de acesso rápido, mensagens de texto e voz para texto.
+- **0.4:** lugares e trajetos pré-definidos, histórico gravado, alertas de saída e SMS de reserva.

@@ -48,9 +48,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v0.1.0-pre.${{ github.run_number }}"
-          cp app/build/outputs/apk/debug/app-debug.apk "ChildrenLocation-0.1-debug.apk"
-          gh release create "$TAG" "ChildrenLocation-0.1-debug.apk" \
+          TAG="v0.2.0-pre.${{ github.run_number }}"
+          cp app/build/outputs/apk/debug/app-debug.apk "ChildrenLocation-0.2-debug.apk"
+          gh release create "$TAG" "ChildrenLocation-0.2-debug.apk" \
             --prerelease \
-            --title "Children Location 0.1 (pré-lançamento)" \
-            --notes "Primeira versão de teste (APK debug, não assinado). Pareamento por código, localização em tempo real e mapa. Veja o README para as limitações de segurança conhecidas."
+            --title "Children Location 0.2 (pré-lançamento)" \
+            --notes "Beta 0.2: só adultos têm conta (e-mail ou Google); a criança entra escaneando o QR. Famílias, convite de outros adultos, aprovação pelo painel de administração, assinatura fixa (atualiza por cima). APK de teste (chave de debug)."

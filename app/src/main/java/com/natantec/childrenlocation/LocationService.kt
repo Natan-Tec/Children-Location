@@ -24,7 +24,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Serviço em primeiro plano do celular da CRIANÇA.
+ * Serviço em primeiro plano do aparelho da CRIANÇA.
  * A notificação é obrigatória e permanente: a criança sempre sabe que está compartilhando.
  * O Fused Location Provider combina GPS, Wi-Fi e rede celular automaticamente.
  */
@@ -33,19 +33,34 @@ class LocationService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client by lazy { LocationServices.getFusedLocationProviderClient(this) }
 
+    // Intervalo adaptativo: parado = menos gravações (economiza bateria e a cota gratuita).
+    private var lastLat = 0.0
+    private var lastLng = 0.0
+    private var lastSentMs = 0L
+
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             val loc = result.lastLocation ?: return
+            val pairing = Prefs.loadPairing(this@LocationService) ?: return
+
+            val now = System.currentTimeMillis()
+            val moved = FloatArray(1)
+            android.location.Location.distanceBetween(lastLat, lastLng, loc.latitude, loc.longitude, moved)
+            val stationary = lastSentMs != 0L && moved[0] < 25f
+            val minGap = if (stationary) 120_000L else 15_000L
+            if (now - lastSentMs < minGap) return
+            lastLat = loc.latitude; lastLng = loc.longitude; lastSentMs = now
+
             val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
             val battery = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             scope.launch {
-                runCatching { Repo.pushLocation(loc.latitude, loc.longitude, loc.accuracy, battery) }
+                runCatching { Repo.pushLocation(pairing, loc.latitude, loc.longitude, loc.accuracy, battery) }
             }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
+        if (Prefs.loadPairing(this) == null) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -83,7 +98,6 @@ class LocationService : Service() {
     private fun startUpdates() {
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 15_000L)
             .setMinUpdateIntervalMillis(10_000L)
-            .setMinUpdateDistanceMeters(10f)
             .build()
         client.requestLocationUpdates(req, callback, mainLooper)
     }
@@ -99,7 +113,6 @@ class LocationService : Service() {
     companion object {
         private const val CHANNEL = "location_sharing"
         private const val NOTIF_ID = 1
-        const val ACTION_STOP = "com.natantec.childrenlocation.STOP"
 
         fun start(ctx: Context) {
             val i = Intent(ctx, LocationService::class.java)

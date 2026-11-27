@@ -1,0 +1,58 @@
+name: Painel (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # A configuração web do Firebase sai do mesmo google-services.json usado no APK.
+      # Chave de API e ID do projeto não são segredos (qualquer app os carrega); quem protege
+      # os dados são as regras do Firestore.
+      - name: Gerar docs/config.js
+        env:
+          GS_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GS_JSON" ]; then
+            echo "::error::Falta o secret GOOGLE_SERVICES_JSON."
+            exit 1
+          fi
+          echo "$GS_JSON" | base64 -d > "$RUNNER_TEMP/gs.json"
+          python3 - "$RUNNER_TEMP/gs.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          pid = d["project_info"]["project_id"]
+          key = d["client"][0]["api_key"][0]["current_key"]
+          cfg = {"apiKey": key, "authDomain": f"{pid}.firebaseapp.com", "projectId": pid}
+          open("docs/config.js", "w").write("export default " + json.dumps(cfg) + ";\n")
+          PY
+          rm -f "$RUNNER_TEMP/gs.json"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
